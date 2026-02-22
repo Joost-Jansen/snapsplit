@@ -1,37 +1,43 @@
 import React from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, Image, Alert } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function ProfileScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
+  const { user, signOut } = useAuth();
 
-  // Mock user data (will connect to Supabase auth later)
-  const user = {
-    display_name: 'Joost Jansen',
-    email: 'joost@example.com',
-    avatar_url: null,
+  const displayName = user?.user_metadata?.display_name || user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User';
+  const email = user?.email || '';
+  const avatarUrl = user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+
+  const handleSignOut = () => {
+    Alert.alert('Sign Out', 'Are you sure you want to sign out?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Sign Out', style: 'destructive', onPress: signOut },
+    ]);
   };
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.profileCard, { backgroundColor: colors.card }]}>
         <View style={styles.avatar}>
-          {user.avatar_url ? (
-            <Image source={{ uri: user.avatar_url }} style={styles.avatarImage} />
+          {avatarUrl ? (
+            <Image source={{ uri: avatarUrl }} style={styles.avatarImage} />
           ) : (
             <Text style={styles.avatarText}>
-              {user.display_name.charAt(0).toUpperCase()}
+              {displayName.charAt(0).toUpperCase()}
             </Text>
           )}
         </View>
         <Text style={[styles.name, { color: colors.text }]}>
-          {user.display_name}
+          {displayName}
         </Text>
         <Text style={[styles.email, { color: colors.secondaryText }]}>
-          {user.email}
+          {email}
         </Text>
       </View>
 
@@ -58,7 +64,7 @@ export default function ProfileScreen() {
           icon="sign-out"
           label="Sign Out"
           colors={colors}
-          onPress={() => {}}
+          onPress={handleSignOut}
           danger
         />
       </View>

@@ -13,11 +13,13 @@ import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
+import { useScan } from '@/contexts/ScanContext';
 
 export default function ScanScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const { setScanResult } = useScan();
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -52,12 +54,33 @@ export default function ScanScreen() {
 
     setLoading(true);
 
-    // For now, navigate to split screen with mock data
-    // Later, this will call POST /api/receipt/scan
-    setTimeout(() => {
+    try {
+      const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000';
+      const formData = new FormData();
+      formData.append('file', {
+        uri: imageUri,
+        name: 'receipt.jpg',
+        type: 'image/jpeg',
+      } as any);
+
+      const res = await fetch(`${API_URL}/api/receipt/scan`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || 'Scan failed');
+      }
+
+      const data = await res.json();
+      setScanResult({ items: data.items });
+      router.push('/split/new');
+    } catch (error: any) {
+      Alert.alert('Scan Error', error.message || 'Failed to scan receipt');
+    } finally {
       setLoading(false);
-      router.push('/split/mock');
-    }, 1500);
+    }
   };
 
   return (

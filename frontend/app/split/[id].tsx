@@ -14,26 +14,9 @@ import { Stack } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import type { SplitItem, UserInfo } from '@/types';
-
-// ─── Mock Data (hardcoded first, connect API later) ─────
-const MOCK_ITEMS: SplitItem[] = [
-  { localId: '1', item_name: 'Caesar Salad', quantity: 1, total_price: 14.5, assignedUserIds: [] },
-  { localId: '2', item_name: 'Margherita Pizza', quantity: 1, total_price: 16.0, assignedUserIds: [] },
-  { localId: '3', item_name: 'Pasta Carbonara', quantity: 1, total_price: 18.5, assignedUserIds: [] },
-  { localId: '4', item_name: 'Grilled Salmon', quantity: 1, total_price: 24.0, assignedUserIds: [] },
-  { localId: '5', item_name: 'Tiramisu', quantity: 2, total_price: 16.0, assignedUserIds: [] },
-  { localId: '6', item_name: 'IPA Beer', quantity: 3, total_price: 21.0, assignedUserIds: [] },
-  { localId: '7', item_name: 'House Wine (glass)', quantity: 2, total_price: 18.0, assignedUserIds: [] },
-  { localId: '8', item_name: 'Sparkling Water', quantity: 1, total_price: 4.5, assignedUserIds: [] },
-];
-
-const MOCK_MEMBERS: UserInfo[] = [
-  { id: 'u1', display_name: 'Joost', avatar_url: null },
-  { id: 'u2', display_name: 'Sophie', avatar_url: null },
-  { id: 'u3', display_name: 'Lucas', avatar_url: null },
-  { id: 'u4', display_name: 'Emma', avatar_url: null },
-];
+import { useAuth } from '@/contexts/AuthContext';
+import { useScan } from '@/contexts/ScanContext';
+import type { SplitItem, UserInfo, ParsedReceiptItem } from '@/types';
 
 const AVATAR_COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
@@ -42,10 +25,36 @@ export default function SplitScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
+  const { user } = useAuth();
+  const { scanResult } = useScan();
 
-  const [items, setItems] = useState<SplitItem[]>(MOCK_ITEMS);
-  const [taxAmount, setTaxAmount] = useState('10.50');
-  const [tipAmount, setTipAmount] = useState('15.00');
+  // Convert scanned items to split items with local IDs
+  const initialItems: SplitItem[] = useMemo(() => {
+    if (scanResult?.items) {
+      return scanResult.items.map((item, idx) => ({
+        ...item,
+        localId: String(idx + 1),
+        assignedUserIds: [],
+      }));
+    }
+    return [];
+  }, [scanResult]);
+
+  // Members: start with current user, allow adding more
+  const [members, setMembers] = useState<UserInfo[]>(() => {
+    const currentUser: UserInfo = {
+      id: user?.id || 'me',
+      display_name: user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Me',
+      avatar_url: user?.user_metadata?.avatar_url || null,
+    };
+    return [currentUser];
+  });
+  const [newMemberName, setNewMemberName] = useState('');
+  const [showAddMember, setShowAddMember] = useState(false);
+
+  const [items, setItems] = useState<SplitItem[]>(initialItems);
+  const [taxAmount, setTaxAmount] = useState('0');
+  const [tipAmount, setTipAmount] = useState('0');
 
   const toggleAssignment = (itemLocalId: string, userId: string) => {
     setItems((prev) =>
@@ -103,8 +112,29 @@ export default function SplitScreen() {
       );
       return;
     }
-    Alert.alert('Saved!', 'Expense saved and settlements calculated. (Mock)');
-    router.back();
+    // Show settlement summary
+    const lines = members
+      .map((m) => {
+        const total = personTotals[m.id] || 0;
+        if (total === 0) return null;
+        return `${m.display_name}: €${total.toFixed(2)}`;
+      })
+      .filter(Boolean);
+    Alert.alert('Split Summary', lines.join('\n'), [
+      { text: 'OK', onPress: () => router.back() },
+    ]);
+  };
+
+  const addMember = () => {
+    if (!newMemberName.trim()) return;
+    const newMember: UserInfo = {
+      id: `local_${Date.now()}`,
+      display_name: newMemberName.trim(),
+      avatar_url: null,
+    };
+    setMembers((prev) => [...prev, newMember]);
+    setNewMemberName('');
+    setShowAddMember(false);
   };
 
   const renderItem = ({ item }: { item: SplitItem }) => (
@@ -131,7 +161,7 @@ export default function SplitScreen() {
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.avatarRow}
       >
-        {MOCK_MEMBERS.map((member, idx) => {
+        {members.map((member, idx) => {
           const isSelected = item.assignedUserIds.includes(member.id);
           const bgColor = AVATAR_COLORS[idx % AVATAR_COLORS.length];
 
@@ -189,9 +219,62 @@ export default function SplitScreen() {
         renderItem={renderItem}
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
-          <Text style={[styles.sectionTitle, { color: colors.secondaryText }]}>
-            Tap avatars to assign items
-          </Text>
+          <View>
+            {/* People bar */}
+            <View style={[styles.peopleBar, { backgroundColor: colors.card }]}>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peopleRow}>
+                {members.map((m, idx) => (
+                  <View key={m.id} style={styles.personChip}>
+                    <View style={[styles.chipAvatar, { backgroundColor: AVATAR_COLORS[idx % AVATAR_COLORS.length] }]}>
+                      <Text style={styles.chipAvatarText}>{m.display_name.charAt(0)}</Text>
+                    </View>
+                    <Text style={[styles.chipName, { color: colors.text }]} numberOfLines={1}>{m.display_name}</Text>
+                  </View>
+                ))}
+                <TouchableOpacity
+                  style={[styles.addPersonBtn, { borderColor: Colors.primary }]}
+                  onPress={() => setShowAddMember(true)}
+                >
+                  <FontAwesome name="plus" size={12} color={Colors.primary} />
+                  <Text style={[styles.addPersonText, { color: Colors.primary }]}>Add</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+
+            {/* Add member input */}
+            {showAddMember && (
+              <View style={[styles.addMemberBox, { backgroundColor: colors.card }]}>
+                <TextInput
+                  style={[styles.addMemberInput, { color: colors.text, borderColor: colors.border }]}
+                  placeholder="Person's name..."
+                  placeholderTextColor={colors.secondaryText}
+                  value={newMemberName}
+                  onChangeText={setNewMemberName}
+                  autoFocus
+                  onSubmitEditing={addMember}
+                />
+                <TouchableOpacity style={[styles.addMemberBtn, { backgroundColor: Colors.primary }]} onPress={addMember}>
+                  <Text style={{ color: '#fff', fontWeight: '600' }}>Add</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowAddMember(false)} style={{ padding: 8 }}>
+                  <FontAwesome name="times" size={16} color={colors.secondaryText} />
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {items.length === 0 ? (
+              <View style={styles.emptyState}>
+                <FontAwesome name="exclamation-circle" size={32} color={colors.secondaryText} />
+                <Text style={[styles.emptyText, { color: colors.secondaryText }]}>
+                  No items found. Go back and scan a receipt.
+                </Text>
+              </View>
+            ) : (
+              <Text style={[styles.sectionTitle, { color: colors.secondaryText }]}>
+                Tap avatars to assign items ({items.length} items)
+              </Text>
+            )}
+          </View>
         }
         ListFooterComponent={
           <View style={styles.footer}>
@@ -244,7 +327,7 @@ export default function SplitScreen() {
               <View style={[styles.divider, { backgroundColor: colors.border }]} />
 
               {/* Per-person breakdown */}
-              {MOCK_MEMBERS.map((member, idx) => {
+              {members.map((member, idx) => {
                 const total = personTotals[member.id] || 0;
                 if (total === 0) return null;
                 return (
@@ -301,6 +384,67 @@ export default function SplitScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   listContent: { padding: 16, paddingBottom: 40 },
+  peopleBar: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  peopleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  personChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  chipAvatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chipAvatarText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  chipName: { fontSize: 13, fontWeight: '500', maxWidth: 80 },
+  addPersonBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    borderWidth: 1.5,
+    borderStyle: 'dashed',
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  addPersonText: { fontSize: 13, fontWeight: '600' },
+  addMemberBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 12,
+    padding: 10,
+    marginBottom: 12,
+  },
+  addMemberInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 8,
+    padding: 10,
+    fontSize: 15,
+  },
+  addMemberBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  emptyState: {
+    alignItems: 'center',
+    padding: 40,
+    gap: 12,
+  },
+  emptyText: { fontSize: 15, textAlign: 'center' },
   sectionTitle: {
     fontSize: 14,
     fontWeight: '500',

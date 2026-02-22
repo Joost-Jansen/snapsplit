@@ -22,11 +22,11 @@ Example output:
 
 Return ONLY the JSON array. No markdown, no explanation, no code fences."""
 
-GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.0-flash:generateContent"
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
 
 
 async def parse_receipt_image(image_bytes: bytes) -> list[ParsedReceiptItem]:
-    """Send receipt image directly to Gemini 3.0 Flash and parse items."""
+    """Send receipt image directly to Gemini 2.5 Flash and parse items."""
     settings = get_settings()
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
 

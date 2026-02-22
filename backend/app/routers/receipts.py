@@ -1,9 +1,7 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException
 
-from app.middleware.auth import get_current_user_id
 from app.models.receipt import ReceiptScanResponse
 from app.services.receipt_parser import parse_receipt_image
-from uuid import UUID
 
 router = APIRouter()
 
@@ -11,8 +9,9 @@ router = APIRouter()
 @router.post("/scan", response_model=ReceiptScanResponse)
 async def scan_receipt(
     file: UploadFile = File(...),
-    user_id: UUID = Depends(get_current_user_id),
 ):
+    # TODO: Re-enable auth once login flow is built
+    # user_id: UUID = Depends(get_current_user_id)
     """Upload a receipt image and get parsed line items."""
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
