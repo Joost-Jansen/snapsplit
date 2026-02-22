@@ -1,14 +1,12 @@
 import base64
 import json
 import httpx
-from openai import OpenAI
 
 from app.config import get_settings
 from app.models.receipt import ParsedReceiptItem
 
 
-RECEIPT_SYSTEM_PROMPT = """You are a receipt parser. You will receive an image of a receipt.
-Extract ALL line items with their quantities and prices.
+RECEIPT_PROMPT = """You are a receipt parser. Extract ALL line items with their quantities and prices from this receipt image.
 Ignore tax, tip, subtotal, and total lines.
 
 Return ONLY a valid JSON array of objects with these exact keys:
@@ -24,40 +22,43 @@ Example output:
 
 Return ONLY the JSON array. No markdown, no explanation, no code fences."""
 
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+
 
 async def parse_receipt_image(image_bytes: bytes) -> list[ParsedReceiptItem]:
-    """Send receipt image directly to LLM vision model and parse items."""
+    """Send receipt image directly to Gemini 2.0 Flash and parse items."""
     settings = get_settings()
-    client = OpenAI(api_key=settings.openai_api_key)
-
     base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": RECEIPT_SYSTEM_PROMPT},
+    payload = {
+        "contents": [
             {
-                "role": "user",
-                "content": [
+                "parts": [
+                    {"text": RECEIPT_PROMPT},
                     {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}",
-                            "detail": "high",
-                        },
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_image,
+                        }
                     },
-                    {
-                        "type": "text",
-                        "text": "Extract all line items from this receipt.",
-                    },
-                ],
-            },
+                ]
+            }
         ],
-        max_tokens=2000,
-        temperature=0,
-    )
+        "generationConfig": {
+            "temperature": 0,
+            "maxOutputTokens": 2000,
+        },
+    }
 
-    raw_output = response.choices[0].message.content.strip()
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.post(
+            f"{GEMINI_API_URL}?key={settings.gemini_api_key}",
+            json=payload,
+        )
+        response.raise_for_status()
+
+    result = response.json()
+    raw_output = result["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     # Clean up potential markdown fences
     if raw_output.startswith("```"):
@@ -69,18 +70,26 @@ async def parse_receipt_image(image_bytes: bytes) -> list[ParsedReceiptItem]:
         items_data = json.loads(raw_output)
     except json.JSONDecodeError:
         # Retry once with a stricter prompt
-        retry_response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
+        retry_payload = {
+            "contents": [
                 {
-                    "role": "system",
-                    "content": "Fix this into valid JSON. Return ONLY a JSON array. No text.",
-                },
-                {"role": "user", "content": raw_output},
+                    "parts": [
+                        {
+                            "text": f"Fix this into valid JSON. Return ONLY a JSON array. No text.\n\n{raw_output}"
+                        }
+                    ]
+                }
             ],
-            max_tokens=2000,
-            temperature=0,
-        )
-        items_data = json.loads(retry_response.choices[0].message.content.strip())
+            "generationConfig": {"temperature": 0},
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            retry_resp = await client.post(
+                f"{GEMINI_API_URL}?key={settings.gemini_api_key}",
+                json=retry_payload,
+            )
+            retry_resp.raise_for_status()
+        retry_result = retry_resp.json()
+        raw_retry = retry_result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        items_data = json.loads(raw_retry)
 
     return [ParsedReceiptItem(**item) for item in items_data]
