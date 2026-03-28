@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   FlatList,
@@ -7,54 +7,58 @@ import {
   Text,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import type { Group, GroupMember, UserInfo } from '@/types';
-
-// ─── Mock Data ──────────────────────────────────────────
-const MOCK_GROUPS: (Group & { memberCount: number })[] = [
-  {
-    id: '1',
-    name: 'Weekend Trip Amsterdam',
-    created_by: 'u1',
-    created_at: '2026-02-20T12:00:00Z',
-    memberCount: 4,
-  },
-  {
-    id: '2',
-    name: 'Office Lunch Gang',
-    created_by: 'u1',
-    created_at: '2026-02-18T12:00:00Z',
-    memberCount: 6,
-  },
-  {
-    id: '3',
-    name: 'Roommates',
-    created_by: 'u2',
-    created_at: '2026-02-15T12:00:00Z',
-    memberCount: 3,
-  },
-];
+import { createGroup, listGroups } from '@/services/api';
+import type { Group } from '@/types';
 
 export default function GroupsScreen() {
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
-  const [groups] = useState(MOCK_GROUPS);
+  const [groups, setGroups] = useState<Group[]>([]);
   const [showCreate, setShowCreate] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [creating, setCreating] = useState(false);
 
-  const handleCreateGroup = () => {
-    if (!newGroupName.trim()) return;
-    Alert.alert('Group Created', `"${newGroupName}" created! (Mock)`);
-    setNewGroupName('');
-    setShowCreate(false);
+  useEffect(() => {
+    void loadGroups();
+  }, []);
+
+  const loadGroups = async () => {
+    try {
+      setLoading(true);
+      const data = await listGroups();
+      setGroups(data);
+    } catch (error: any) {
+      Alert.alert('Could not load groups', error.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderGroup = ({ item }: { item: (typeof MOCK_GROUPS)[0] }) => (
+  const handleCreateGroup = async () => {
+    if (!newGroupName.trim()) return;
+    try {
+      setCreating(true);
+      const createdGroup = await createGroup(newGroupName.trim());
+      setGroups((prev) => [createdGroup, ...prev]);
+      setNewGroupName('');
+      setShowCreate(false);
+      router.push(`/group/${createdGroup.id}`);
+    } catch (error: any) {
+      Alert.alert('Could not create group', error.message || 'Please try again.');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const renderGroup = ({ item }: { item: Group }) => (
     <TouchableOpacity
       style={[styles.groupCard, { backgroundColor: colors.card }]}
       onPress={() => router.push(`/group/${item.id}`)}
@@ -68,7 +72,7 @@ export default function GroupsScreen() {
           {item.name}
         </Text>
         <Text style={[styles.groupMeta, { color: colors.secondaryText }]}>
-          {item.memberCount} members
+          Created {new Date(item.created_at).toLocaleDateString()}
         </Text>
       </View>
       <FontAwesome name="chevron-right" size={14} color={colors.secondaryText} />
@@ -97,19 +101,32 @@ export default function GroupsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.btn, { backgroundColor: Colors.primary }]}
-              onPress={handleCreateGroup}
+              onPress={() => void handleCreateGroup()}
+              disabled={creating}
             >
-              <Text style={{ color: '#fff', fontWeight: '600' }}>Create</Text>
+              {creating ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <Text style={{ color: '#fff', fontWeight: '600' }}>Create</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
       )}
 
+      {loading ? (
+        <View style={styles.loadingState}>
+          <ActivityIndicator size="large" color={Colors.primary} />
+          <Text style={[styles.loadingText, { color: colors.secondaryText }]}>Loading groups...</Text>
+        </View>
+      ) : (
       <FlatList
         data={groups}
         renderItem={renderGroup}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.list}
+        onRefresh={() => void loadGroups()}
+        refreshing={loading}
         ListEmptyComponent={
           <View style={styles.empty}>
             <FontAwesome name="users" size={48} color={colors.secondaryText} />
@@ -119,6 +136,7 @@ export default function GroupsScreen() {
           </View>
         }
       />
+      )}
 
       <TouchableOpacity
         style={styles.fab}
@@ -134,6 +152,13 @@ export default function GroupsScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   list: { padding: 16, paddingBottom: 100 },
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: { fontSize: 15 },
   groupCard: {
     flexDirection: 'row',
     alignItems: 'center',

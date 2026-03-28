@@ -10,6 +10,7 @@ from app.models.group import (
     GroupMemberOut,
     AddMemberRequest,
 )
+from app.models.expense import ExpenseOut
 
 router = APIRouter()
 
@@ -121,6 +122,36 @@ async def get_group(
 
     group_data["members"] = members
     return group_data
+
+
+@router.get("/{group_id}/expenses", response_model=list[ExpenseOut])
+async def list_group_expenses(
+    group_id: UUID,
+    user_id: UUID = Depends(get_current_user_id),
+):
+    """List expenses for a group the current user belongs to."""
+    db = get_supabase_admin()
+
+    membership = (
+        db.table("group_members")
+        .select("id")
+        .eq("group_id", str(group_id))
+        .eq("user_id", str(user_id))
+        .execute()
+    )
+
+    if not membership.data:
+        raise HTTPException(status_code=403, detail="Not a member of this group")
+
+    expenses_result = (
+        db.table("expenses")
+        .select("*")
+        .eq("group_id", str(group_id))
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    return expenses_result.data
 
 
 @router.post("/{group_id}/members", response_model=GroupMemberOut, status_code=201)

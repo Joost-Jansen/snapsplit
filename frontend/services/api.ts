@@ -8,6 +8,7 @@ import type {
   ExpenseDetail,
   Settlement,
   UserShare,
+  User,
 } from "../types";
 
 const API_BASE = process.env.EXPO_PUBLIC_API_URL || "http://localhost:8000";
@@ -49,6 +50,19 @@ async function apiFetch<T>(
 }
 
 // ─── Groups ─────────────────────────────────────────────
+export async function getMe(): Promise<User> {
+  return apiFetch<User>("/api/auth/me");
+}
+
+export async function updateMe(
+  updates: Partial<Pick<User, "display_name" | "avatar_url">>
+): Promise<User> {
+  return apiFetch<User>("/api/auth/me", {
+    method: "PUT",
+    body: JSON.stringify(updates),
+  });
+}
+
 export async function createGroup(name: string): Promise<Group> {
   return apiFetch<Group>("/api/groups", {
     method: "POST",
@@ -62,6 +76,10 @@ export async function listGroups(): Promise<Group[]> {
 
 export async function getGroup(groupId: string): Promise<GroupDetail> {
   return apiFetch<GroupDetail>(`/api/groups/${groupId}`);
+}
+
+export async function getGroupExpenses(groupId: string): Promise<Expense[]> {
+  return apiFetch<Expense[]>(`/api/groups/${groupId}/expenses`);
 }
 
 export async function addMember(

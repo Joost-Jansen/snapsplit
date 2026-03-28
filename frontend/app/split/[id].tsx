@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   StyleSheet,
   View,
@@ -8,6 +8,7 @@ import {
   ScrollView,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Stack } from 'expo-router';
@@ -16,17 +17,26 @@ import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useAuth } from '@/contexts/AuthContext';
 import { useScan } from '@/contexts/ScanContext';
-import type { SplitItem, UserInfo, ParsedReceiptItem } from '@/types';
+import { createExpense, getGroup } from '@/services/api';
+import type { GroupDetail, SplitItem, UserInfo } from '@/types';
 
 const AVATAR_COLORS = ['#4F46E5', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899'];
 
 export default function SplitScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, groupId, groupName } = useLocalSearchParams<{
+    id: string;
+    groupId?: string;
+    groupName?: string;
+  }>();
   const colorScheme = useColorScheme();
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
   const { user } = useAuth();
-  const { scanResult } = useScan();
+  const { scanResult, setScanResult } = useScan();
+  const [saving, setSaving] = useState(false);
+  const [loadingGroup, setLoadingGroup] = useState(false);
+  const [expenseDescription, setExpenseDescription] = useState('Scanned receipt');
+  const [group, setGroup] = useState<GroupDetail | null>(null);
 
   // Convert scanned items to split items with local IDs
   const initialItems: SplitItem[] = useMemo(() => {
@@ -55,6 +65,36 @@ export default function SplitScreen() {
   const [items, setItems] = useState<SplitItem[]>(initialItems);
   const [taxAmount, setTaxAmount] = useState('0');
   const [tipAmount, setTipAmount] = useState('0');
+
+  useEffect(() => {
+    setItems(initialItems);
+  }, [initialItems]);
+
+  useEffect(() => {
+    if (!groupId) return;
+
+    const loadGroup = async () => {
+      try {
+        setLoadingGroup(true);
+        const result = await getGroup(groupId);
+        setGroup(result);
+        setMembers(
+          result.members.map((member) => ({
+            id: member.user?.id || member.user_id,
+            display_name:
+              member.user?.display_name || member.user_id.slice(0, 8),
+            avatar_url: member.user?.avatar_url || null,
+          }))
+        );
+      } catch (error: any) {
+        Alert.alert('Could not load group members', error.message || 'Please try again.');
+      } finally {
+        setLoadingGroup(false);
+      }
+    };
+
+    void loadGroup();
+  }, [groupId]);
 
   const toggleAssignment = (itemLocalId: string, userId: string) => {
     setItems((prev) =>
@@ -103,7 +143,15 @@ export default function SplitScreen() {
   const grandTotal =
     subtotal + (parseFloat(taxAmount) || 0) + (parseFloat(tipAmount) || 0);
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    if (!groupId) {
+      Alert.alert(
+        'Choose a group first',
+        'Open the scan flow from a group to save this receipt.'
+      );
+      return;
+    }
+
     const unassigned = items.filter((i) => i.assignedUserIds.length === 0);
     if (unassigned.length > 0) {
       Alert.alert(
@@ -112,7 +160,7 @@ export default function SplitScreen() {
       );
       return;
     }
-    // Show settlement summary
+
     const lines = members
       .map((m) => {
         const total = personTotals[m.id] || 0;
@@ -120,12 +168,40 @@ export default function SplitScreen() {
         return `${m.display_name}: €${total.toFixed(2)}`;
       })
       .filter(Boolean);
-    Alert.alert('Split Summary', lines.join('\n'), [
-      { text: 'OK', onPress: () => router.back() },
-    ]);
+
+    try {
+      setSaving(true);
+      await createExpense({
+        group_id: groupId,
+        description: expenseDescription.trim() || 'Scanned receipt',
+        total_amount: grandTotal,
+        tax_amount: parseFloat(taxAmount) || 0,
+        tip_amount: parseFloat(tipAmount) || 0,
+        items: items.map((item) => ({
+          item_name: item.item_name,
+          quantity: item.quantity,
+          unit_price: item.quantity > 0 ? item.total_price / item.quantity : item.total_price,
+          total_price: item.total_price,
+          assigned_user_ids: item.assignedUserIds,
+        })),
+      });
+
+      setScanResult(null);
+      Alert.alert('Expense Saved', lines.join('\n') || 'Expense saved successfully.', [
+        {
+          text: 'View Group',
+          onPress: () => router.replace(`/group/${groupId}`),
+        },
+      ]);
+    } catch (error: any) {
+      Alert.alert('Could not save expense', error.message || 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const addMember = () => {
+    if (groupId) return;
     if (!newMemberName.trim()) return;
     const newMember: UserInfo = {
       id: `local_${Date.now()}`,
@@ -220,6 +296,32 @@ export default function SplitScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View>
+            <View
+              style={[
+                styles.groupNotice,
+                {
+                  backgroundColor: groupId ? '#ECFDF5' : '#FFFBEB',
+                  borderColor: groupId ? '#A7F3D0' : '#FCD34D',
+                },
+              ]}
+            >
+              <FontAwesome
+                name={groupId ? 'users' : 'exclamation-circle'}
+                size={16}
+                color={groupId ? '#047857' : '#B45309'}
+              />
+              <Text
+                style={[
+                  styles.groupNoticeText,
+                  { color: groupId ? '#065F46' : '#92400E' },
+                ]}
+              >
+                {groupId
+                  ? `Saving into ${group?.name || groupName || 'this group'}`
+                  : 'This split is in preview mode. Open Scan from a group to save it.'}
+              </Text>
+            </View>
+
             {/* People bar */}
             <View style={[styles.peopleBar, { backgroundColor: colors.card }]}>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.peopleRow}>
@@ -231,18 +333,20 @@ export default function SplitScreen() {
                     <Text style={[styles.chipName, { color: colors.text }]} numberOfLines={1}>{m.display_name}</Text>
                   </View>
                 ))}
-                <TouchableOpacity
-                  style={[styles.addPersonBtn, { borderColor: Colors.primary }]}
-                  onPress={() => setShowAddMember(true)}
-                >
-                  <FontAwesome name="plus" size={12} color={Colors.primary} />
-                  <Text style={[styles.addPersonText, { color: Colors.primary }]}>Add</Text>
-                </TouchableOpacity>
+                {!groupId && (
+                  <TouchableOpacity
+                    style={[styles.addPersonBtn, { borderColor: Colors.primary }]}
+                    onPress={() => setShowAddMember(true)}
+                  >
+                    <FontAwesome name="plus" size={12} color={Colors.primary} />
+                    <Text style={[styles.addPersonText, { color: Colors.primary }]}>Add</Text>
+                  </TouchableOpacity>
+                )}
               </ScrollView>
             </View>
 
             {/* Add member input */}
-            {showAddMember && (
+            {!groupId && showAddMember && (
               <View style={[styles.addMemberBox, { backgroundColor: colors.card }]}>
                 <TextInput
                   style={[styles.addMemberInput, { color: colors.text, borderColor: colors.border }]}
@@ -259,6 +363,24 @@ export default function SplitScreen() {
                 <TouchableOpacity onPress={() => setShowAddMember(false)} style={{ padding: 8 }}>
                   <FontAwesome name="times" size={16} color={colors.secondaryText} />
                 </TouchableOpacity>
+              </View>
+            )}
+
+            <View style={[styles.descriptionCard, { backgroundColor: colors.card }]}> 
+              <Text style={[styles.descriptionLabel, { color: colors.secondaryText }]}>Expense description</Text>
+              <TextInput
+                style={[styles.descriptionInput, { color: colors.text, borderColor: colors.border }]}
+                value={expenseDescription}
+                onChangeText={setExpenseDescription}
+                placeholder="Dinner, groceries, brunch..."
+                placeholderTextColor={colors.secondaryText}
+              />
+            </View>
+
+            {loadingGroup && (
+              <View style={styles.inlineLoading}>
+                <ActivityIndicator size="small" color={Colors.primary} />
+                <Text style={[styles.inlineLoadingText, { color: colors.secondaryText }]}>Loading group members...</Text>
               </View>
             )}
 
@@ -367,12 +489,19 @@ export default function SplitScreen() {
 
             {/* Save Button */}
             <TouchableOpacity
-              style={styles.saveBtn}
-              onPress={handleSave}
+              style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+              onPress={() => void handleSave()}
               activeOpacity={0.8}
+              disabled={saving || loadingGroup || items.length === 0}
             >
-              <FontAwesome name="check" size={18} color="#fff" />
-              <Text style={styles.saveBtnText}>Save & Calculate Settlements</Text>
+              {saving ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <>
+                  <FontAwesome name="check" size={18} color="#fff" />
+                  <Text style={styles.saveBtnText}>Save & Calculate Settlements</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         }
@@ -384,6 +513,21 @@ export default function SplitScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   listContent: { padding: 16, paddingBottom: 40 },
+  groupNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+  },
+  groupNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '500',
+  },
   peopleBar: {
     borderRadius: 12,
     padding: 12,
@@ -439,6 +583,31 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 8,
   },
+  descriptionCard: {
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  descriptionLabel: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 6,
+  },
+  descriptionInput: {
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+  },
+  inlineLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  inlineLoadingText: { fontSize: 13 },
   emptyState: {
     alignItems: 'center',
     padding: 40,
@@ -533,6 +702,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginTop: 4,
+  },
+  saveBtnDisabled: {
+    opacity: 0.7,
   },
   saveBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

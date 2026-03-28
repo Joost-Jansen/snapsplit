@@ -13,8 +13,7 @@ SnapSplit lets you snap a photo of a receipt, automatically extracts line items 
 | Frontend (Mobile) | React Native (Expo) | Cross-platform iOS/Android app |
 | Backend (API) | Python (FastAPI) | REST API, business logic, ML pipeline |
 | Database & Auth | Supabase (PostgreSQL) | Auth, relational data, real-time |
-| OCR | Google Cloud Vision API | Raw text extraction from receipt images |
-| Receipt Parsing | LLM (Gemini Pro / GPT-4o) | Structured JSON extraction from OCR text |
+| Receipt Parsing | Gemini 2.5 Flash Vision | Structured line-item extraction from receipt images |
 
 ---
 
@@ -128,9 +127,10 @@ Settlements
 ## API Endpoints
 
 ### Auth
-- `POST /api/auth/register` — Register new user
-- `POST /api/auth/login` — Login, get JWT
-- `GET /api/auth/me` — Get current user
+- `GET /api/auth/me` — Get current user profile
+- `PUT /api/auth/me` — Update current user profile
+
+The Expo app handles sign-in directly with Supabase Auth using email/password or OAuth providers.
 
 ### Groups
 - `POST /api/groups` — Create group
@@ -146,7 +146,7 @@ Settlements
 - `GET /api/groups/{id}/expenses` — List group expenses
 
 ### Settlements
-- `GET /api/expenses/{id}/settlements` — Calculate who owes what
+- `GET /api/settlements/expense/{id}` — Calculate or fetch settlements for an expense
 - `POST /api/settlements/{id}/mark-paid` — Mark a settlement as paid
 
 ---
@@ -156,10 +156,22 @@ Settlements
 ### Prerequisites
 - Node.js 18+
 - Python 3.11+
-- Expo CLI (`npm install -g expo-cli`)
 - Supabase account (free tier works)
-- Google Cloud account (for Vision API)
-- LLM API key (Gemini or OpenAI)
+- Docker Desktop (recommended for `supabase start` locally)
+- LLM API key (Gemini)
+
+### Auth Providers
+SnapSplit uses Supabase Auth directly from the Expo app. The backend only validates Supabase JWTs.
+
+Supported providers in the app:
+- Email / password
+- Google
+
+To enable social sign-in:
+1. Open Supabase Dashboard → Authentication → Providers.
+2. Enable `Google`.
+3. Add `snapsplit://auth/callback` as a redirect URL.
+4. For Expo dev builds, also add local Expo callback URLs shown in `supabase/config.toml`.
 
 ### Backend Setup
 ```bash
@@ -177,6 +189,23 @@ cd frontend
 npm install
 npx expo start
 ```
+
+### Database Workflow
+SnapSplit now includes a Supabase CLI layout and root scripts.
+
+Common commands:
+```bash
+npm run db:start
+npm run db:push
+npm run db:reset
+npm run db:types
+npm run db:new-migration -- add_expense_tags
+```
+
+Canonical schema location:
+- `supabase/migrations/20260328153000_initial_schema.sql`
+
+The legacy SQL snapshot remains at `backend/supabase/migration.sql` for reference.
 
 ---
 

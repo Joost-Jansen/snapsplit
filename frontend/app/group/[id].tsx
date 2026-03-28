@@ -1,80 +1,19 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   StyleSheet,
   View,
   Text,
   FlatList,
   TouchableOpacity,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Stack } from 'expo-router';
+import { useLocalSearchParams, useRouter, Stack } from 'expo-router';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import type { GroupMember, Expense } from '@/types';
-
-// ─── Mock Data ──────────────────────────────────────────
-const MOCK_MEMBERS: GroupMember[] = [
-  {
-    id: 'm1',
-    group_id: '1',
-    user_id: 'u1',
-    role: 'admin',
-    joined_at: '2026-02-20T12:00:00Z',
-    user: { id: 'u1', display_name: 'Joost', avatar_url: null },
-  },
-  {
-    id: 'm2',
-    group_id: '1',
-    user_id: 'u2',
-    role: 'member',
-    joined_at: '2026-02-20T12:00:00Z',
-    user: { id: 'u2', display_name: 'Sophie', avatar_url: null },
-  },
-  {
-    id: 'm3',
-    group_id: '1',
-    user_id: 'u3',
-    role: 'member',
-    joined_at: '2026-02-20T12:00:00Z',
-    user: { id: 'u3', display_name: 'Lucas', avatar_url: null },
-  },
-  {
-    id: 'm4',
-    group_id: '1',
-    user_id: 'u4',
-    role: 'member',
-    joined_at: '2026-02-20T12:00:00Z',
-    user: { id: 'u4', display_name: 'Emma', avatar_url: null },
-  },
-];
-
-const MOCK_EXPENSES: Expense[] = [
-  {
-    id: 'e1',
-    group_id: '1',
-    created_by: 'u1',
-    description: 'Dinner at De Kas',
-    total_amount: 156.5,
-    tax_amount: 12.5,
-    tip_amount: 15.0,
-    receipt_image_url: null,
-    status: 'pending',
-    created_at: '2026-02-21T20:00:00Z',
-  },
-  {
-    id: 'e2',
-    group_id: '1',
-    created_by: 'u2',
-    description: 'Groceries',
-    total_amount: 45.2,
-    tax_amount: 3.8,
-    tip_amount: 0,
-    receipt_image_url: null,
-    status: 'settled',
-    created_at: '2026-02-20T15:00:00Z',
-  },
-];
+import { getGroup, getGroupExpenses } from '@/services/api';
+import type { Expense, GroupDetail, GroupMember } from '@/types';
 
 export default function GroupDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -82,15 +21,125 @@ export default function GroupDetailScreen() {
   const colors = Colors[colorScheme ?? 'light'];
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<'expenses' | 'members'>('expenses');
+  const [group, setGroup] = useState<GroupDetail | null>(null);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const groupName = 'Weekend Trip Amsterdam'; // Will fetch from API
+  useEffect(() => {
+    if (!id) {
+      return;
+    }
+    void loadGroupData(true);
+  }, [id]);
+
+  const loadGroupData = async (showLoading = false) => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      if (showLoading) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+
+      const [groupResult, expenseResult] = await Promise.all([
+        getGroup(id),
+        getGroupExpenses(id),
+      ]);
+
+      setGroup(groupResult);
+      setExpenses(expenseResult);
+    } catch (error: any) {
+      Alert.alert('Could not load group', error.message || 'Please try again.');
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <View style={[styles.loadingState, { backgroundColor: colors.background }]}> 
+        <ActivityIndicator size="large" color={Colors.primary} />
+        <Text style={[styles.loadingText, { color: colors.secondaryText }]}>Loading group...</Text>
+      </View>
+    );
+  }
+
+  if (!group) {
+    return (
+      <View style={[styles.loadingState, { backgroundColor: colors.background }]}> 
+        <Text style={[styles.loadingText, { color: colors.secondaryText }]}>Group not found.</Text>
+        <TouchableOpacity style={styles.retryBtn} onPress={() => void loadGroupData(true)}>
+          <Text style={styles.retryBtnText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  const renderExpense = ({ item }: { item: Expense }) => (
+    <TouchableOpacity
+      style={[styles.expenseCard, { backgroundColor: colors.card }]}
+      activeOpacity={0.7}
+    >
+      <View style={styles.expenseLeft}>
+        <Text style={[styles.expenseDesc, { color: colors.text }]}>
+          {item.description || 'Untitled expense'}
+        </Text>
+        <Text style={[styles.expenseDate, { color: colors.secondaryText }]}>
+          {new Date(item.created_at).toLocaleDateString()}
+        </Text>
+      </View>
+      <View style={styles.expenseRight}>
+        <Text style={[styles.expenseAmount, { color: colors.text }]}>€{item.total_amount.toFixed(2)}</Text>
+        <View
+          style={[
+            styles.statusBadge,
+            {
+              backgroundColor: item.status === 'settled' ? '#D1FAE5' : '#FEF3C7',
+            },
+          ]}
+        >
+          <Text
+            style={{
+              fontSize: 11,
+              fontWeight: '600',
+              color: item.status === 'settled' ? '#065F46' : '#92400E',
+            }}
+          >
+            {item.status}
+          </Text>
+        </View>
+      </View>
+    </TouchableOpacity>
+  );
+
+  const renderMember = ({ item }: { item: GroupMember }) => (
+    <View style={[styles.memberRow, { backgroundColor: colors.card }]}> 
+      <View style={styles.memberAvatar}>
+        <Text style={styles.memberAvatarText}>
+          {item.user?.display_name?.charAt(0) ?? '?'}
+        </Text>
+      </View>
+      <View style={styles.memberInfo}>
+        <Text style={[styles.memberName, { color: colors.text }]}>
+          {item.user?.display_name || item.user_id}
+        </Text>
+        <Text style={[styles.memberRole, { color: colors.secondaryText }]}>
+          {item.role}
+        </Text>
+      </View>
+    </View>
+  );
 
   return (
-    <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <Stack.Screen options={{ title: groupName }} />
+    <View style={[styles.container, { backgroundColor: colors.background }]}> 
+      <Stack.Screen options={{ title: group.name }} />
 
-      {/* Tab Switcher */}
-      <View style={[styles.tabBar, { backgroundColor: colors.card }]}>
+      <View style={[styles.tabBar, { backgroundColor: colors.card }]}> 
         <TouchableOpacity
           style={[
             styles.tab,
@@ -102,12 +151,11 @@ export default function GroupDetailScreen() {
             style={[
               styles.tabText,
               {
-                color:
-                  activeTab === 'expenses' ? Colors.primary : colors.secondaryText,
+                color: activeTab === 'expenses' ? Colors.primary : colors.secondaryText,
               },
             ]}
           >
-            Expenses
+            Expenses ({expenses.length})
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -121,90 +169,49 @@ export default function GroupDetailScreen() {
             style={[
               styles.tabText,
               {
-                color:
-                  activeTab === 'members' ? Colors.primary : colors.secondaryText,
+                color: activeTab === 'members' ? Colors.primary : colors.secondaryText,
               },
             ]}
           >
-            Members ({MOCK_MEMBERS.length})
+            Members ({group.members.length})
           </Text>
         </TouchableOpacity>
       </View>
 
       {activeTab === 'expenses' ? (
         <FlatList
-          data={MOCK_EXPENSES}
+          data={expenses}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.expenseCard, { backgroundColor: colors.card }]}
-              activeOpacity={0.7}
-            >
-              <View style={styles.expenseLeft}>
-                <Text style={[styles.expenseDesc, { color: colors.text }]}>
-                  {item.description}
-                </Text>
-                <Text style={[styles.expenseDate, { color: colors.secondaryText }]}>
-                  {new Date(item.created_at).toLocaleDateString()}
-                </Text>
-              </View>
-              <View style={styles.expenseRight}>
-                <Text style={[styles.expenseAmount, { color: colors.text }]}>
-                  €{item.total_amount.toFixed(2)}
-                </Text>
-                <View
-                  style={[
-                    styles.statusBadge,
-                    {
-                      backgroundColor:
-                        item.status === 'settled' ? '#D1FAE5' : '#FEF3C7',
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      fontWeight: '600',
-                      color: item.status === 'settled' ? '#065F46' : '#92400E',
-                    }}
-                  >
-                    {item.status}
-                  </Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          )}
+          onRefresh={() => void loadGroupData()}
+          refreshing={refreshing}
+          renderItem={renderExpense}
+          ListEmptyComponent={
+            <View style={styles.emptyState}>
+              <FontAwesome name="file-text-o" size={36} color={colors.secondaryText} />
+              <Text style={[styles.emptyStateText, { color: colors.secondaryText }]}>No expenses yet.</Text>
+            </View>
+          }
         />
       ) : (
         <FlatList
-          data={MOCK_MEMBERS}
+          data={group.members}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <View style={[styles.memberRow, { backgroundColor: colors.card }]}>
-              <View style={styles.memberAvatar}>
-                <Text style={styles.memberAvatarText}>
-                  {item.user?.display_name?.charAt(0) ?? '?'}
-                </Text>
-              </View>
-              <View style={styles.memberInfo}>
-                <Text style={[styles.memberName, { color: colors.text }]}>
-                  {item.user?.display_name}
-                </Text>
-                <Text style={[styles.memberRole, { color: colors.secondaryText }]}>
-                  {item.role}
-                </Text>
-              </View>
-            </View>
-          )}
+          onRefresh={() => void loadGroupData()}
+          refreshing={refreshing}
+          renderItem={renderMember}
         />
       )}
 
-      {/* FAB to add expense */}
       <TouchableOpacity
         style={styles.fab}
-        onPress={() => router.push('/(tabs)/scan')}
+        onPress={() =>
+          router.push({
+            pathname: '/(tabs)/scan',
+            params: { groupId: group.id, groupName: group.name },
+          })
+        }
         activeOpacity={0.8}
       >
         <FontAwesome name="plus" size={24} color="#fff" />
@@ -215,6 +222,20 @@ export default function GroupDetailScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  loadingState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+  },
+  loadingText: { fontSize: 15 },
+  retryBtn: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  retryBtnText: { color: '#fff', fontWeight: '600' },
   tabBar: {
     flexDirection: 'row',
     borderBottomWidth: 1,
@@ -229,6 +250,12 @@ const styles = StyleSheet.create({
   },
   tabText: { fontSize: 15, fontWeight: '600' },
   listContent: { padding: 16, paddingBottom: 100 },
+  emptyState: {
+    alignItems: 'center',
+    paddingTop: 80,
+    gap: 12,
+  },
+  emptyStateText: { fontSize: 15 },
   expenseCard: {
     flexDirection: 'row',
     padding: 16,

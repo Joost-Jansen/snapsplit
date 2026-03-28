@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState } from 'react';
 import type { ParsedReceiptItem } from '@/types';
 
-interface ScanResult {
+export interface ScanResult {
   items: ParsedReceiptItem[];
 }
 

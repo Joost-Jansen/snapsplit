@@ -1,0 +1,17 @@
+{
+  "name": "snapsplit-workspace",
+  "private": true,
+  "scripts": {
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:status": "supabase status",
+    "db:push": "supabase db push",
+    "db:reset": "supabase db reset",
+    "db:types": "supabase gen types typescript --local > frontend/types/supabase.generated.ts",
+    "db:new-migration": "supabase migration new",
+    "frontend:typecheck": "cd frontend && npm run typecheck"
+  },
+  "devDependencies": {
+    "supabase": "2.84.4"
+  }
+}

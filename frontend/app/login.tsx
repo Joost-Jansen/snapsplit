@@ -13,12 +13,25 @@ import {
 } from 'react-native';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { supabase } from '@/services/supabase';
+import { signInWithOAuthProvider } from '@/services/oauth';
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
-import * as WebBrowser from 'expo-web-browser';
-import { makeRedirectUri } from 'expo-auth-session';
 
-WebBrowser.maybeCompleteAuthSession();
+type SocialProvider = 'google';
+
+const SOCIAL_BUTTONS: Array<{
+  provider: SocialProvider;
+  label: string;
+  icon: React.ComponentProps<typeof FontAwesome>['name'];
+  iconColor: string;
+}> = [
+  {
+    provider: 'google',
+    label: 'Continue with Google',
+    icon: 'google',
+    iconColor: '#DB4437',
+  },
+];
 
 export default function LoginScreen() {
   const colorScheme = useColorScheme();
@@ -28,7 +41,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [googleLoading, setGoogleLoading] = useState(false);
+  const [providerLoading, setProviderLoading] = useState<SocialProvider | null>(null);
 
   const handleEmailAuth = async () => {
     if (!email || !password) {
@@ -64,49 +77,14 @@ export default function LoginScreen() {
     }
   };
 
-  const handleGoogleSignIn = async () => {
-    setGoogleLoading(true);
+  const handleSocialSignIn = async (provider: SocialProvider) => {
+    setProviderLoading(provider);
     try {
-      const redirectUrl = makeRedirectUri({
-        scheme: 'snapsplit',
-        path: 'auth/callback',
-      });
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-          skipBrowserRedirect: true,
-        },
-      });
-
-      if (error) throw error;
-
-      if (data?.url) {
-        const result = await WebBrowser.openAuthSessionAsync(
-          data.url,
-          redirectUrl
-        );
-
-        if (result.type === 'success') {
-          const url = result.url;
-          // Extract tokens from the URL fragment
-          const params = new URLSearchParams(url.split('#')[1] || url.split('?')[1] || '');
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
-
-          if (accessToken && refreshToken) {
-            await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-          }
-        }
-      }
+      await signInWithOAuthProvider(provider);
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Google sign-in failed');
+      Alert.alert('Error', error.message || `${provider} sign-in failed`);
     } finally {
-      setGoogleLoading(false);
+      setProviderLoading(null);
     }
   };
 
@@ -130,24 +108,34 @@ export default function LoginScreen() {
           </Text>
         </View>
 
-        {/* Google Sign In */}
-        <TouchableOpacity
-          style={[styles.googleBtn, { borderColor: colors.border }]}
-          onPress={handleGoogleSignIn}
-          disabled={googleLoading}
-          activeOpacity={0.7}
-        >
-          {googleLoading ? (
-            <ActivityIndicator size="small" color={Colors.primary} />
-          ) : (
-            <>
-              <FontAwesome name="google" size={20} color="#DB4437" />
-              <Text style={[styles.googleBtnText, { color: colors.text }]}>
-                Continue with Google
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
+        {SOCIAL_BUTTONS.map((button) => {
+          const isLoading = providerLoading === button.provider;
+
+          return (
+            <TouchableOpacity
+              key={button.provider}
+              style={[styles.socialBtn, { borderColor: colors.border, backgroundColor: colors.card }]}
+              onPress={() => void handleSocialSignIn(button.provider)}
+              disabled={providerLoading !== null}
+              activeOpacity={0.7}
+            >
+              {isLoading ? (
+                <ActivityIndicator size="small" color={Colors.primary} />
+              ) : (
+                <>
+                  <FontAwesome name={button.icon} size={20} color={button.iconColor} />
+                  <Text style={[styles.socialBtnText, { color: colors.text }]}>
+                    {button.label}
+                  </Text>
+                </>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+
+        <Text style={[styles.socialHint, { color: colors.secondaryText }]}> 
+          Enable Google in Supabase Auth to use Google sign-in.
+        </Text>
 
         {/* Divider */}
         <View style={styles.dividerRow}>
@@ -255,19 +243,25 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginTop: 4,
   },
-  googleBtn: {
+  socialBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     padding: 14,
     borderRadius: 12,
+    backgroundColor: '#fff',
     borderWidth: 1.5,
     gap: 10,
-    marginBottom: 20,
+    marginBottom: 12,
   },
-  googleBtnText: {
+  socialBtnText: {
     fontSize: 16,
     fontWeight: '600',
+  },
+  socialHint: {
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 20,
   },
   dividerRow: {
     flexDirection: 'row',
